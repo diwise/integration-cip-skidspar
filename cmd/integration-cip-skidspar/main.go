@@ -30,7 +30,6 @@ func main() {
 
 	serviceVersion := buildinfo.SourceVersion()
 	ctx, logger, cleanup := o11y.Init(context.Background(), serviceName, serviceVersion)
-	defer cleanup()
 
 	brokerURL := env.GetVariableOrDie(logger, "CONTEXT_BROKER_URL", "a valid context broker URL")
 
@@ -45,23 +44,56 @@ func main() {
 	trailIDFormat := env.GetVariableOrDefault(logger, "NGSI_TRAILID_FORMAT", "%s")
 
 	do(ctx, location, apiKey, cbClient, trailIDFormat)
+
+	logger.Info().Msg("running cleanup ...")
+	cleanup()
+
+	time.Sleep(5 * time.Second)
+	logger.Info().Msg("done")
 }
 
 func do(ctx context.Context, location, apiKey string, cbClient client.ContextBrokerClient, trailIDFormat string) {
 
 	var err error
 
-	ctx, span := tracer.Start(ctx, "get-langdspar")
+	ctx, span := tracer.Start(ctx, "integrate-status-from-langdspar")
 	defer func() { tracing.RecordAnyErrorAndEndSpan(err, span) }()
 
 	_, ctx, logger := o11y.AddTraceIDToLoggerAndStoreInContext(span, logging.GetFromContext(ctx), ctx)
+
+	status, err := getTrailStatus(ctx, location, apiKey)
+	if err != nil {
+		logger.Error().Err(err).Msg("failed to retrieve trail status")
+		return
+	}
+
+	err = updateTrailsInBroker(ctx, status, cbClient, trailIDFormat)
+	if err != nil {
+		logger.Error().Err(err).Msg("failed to update trail statuses in broker")
+	}
+}
+
+type Status struct {
+	Ski map[string]struct {
+		Active          bool   `json:"isActive"`
+		ExternalID      string `json:"externalId"`
+		LastPreparation string `json:"lastPreparation"`
+	} `json:"Ski"`
+}
+
+func getTrailStatus(ctx context.Context, location, apiKey string) (*Status, error) {
+
+	var err error
+
+	ctx, span := tracer.Start(ctx, "get-langdspar-status")
+	defer func() { tracing.RecordAnyErrorAndEndSpan(err, span) }()
 
 	url := fmt.Sprintf("https://xn--lngdspr-5wao.se/api/locations/%s/routes-status.json?apiKey=%s", location, apiKey)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
-		logger.Error().Err(err).Msg("failed to create http request")
-		return
+		err = fmt.Errorf("failed to create http request: %s", err.Error())
+		return nil, err
 	}
 
 	httpClient := http.Client{
@@ -70,27 +102,38 @@ func do(ctx context.Context, location, apiKey string, cbClient client.ContextBro
 
 	resp, err := httpClient.Do(req)
 	if err != nil {
-		logger.Error().Err(err).Msg("failed to request trail status update")
-		return
+		err = fmt.Errorf("failed to request trail status update: %s", err.Error())
+		return nil, err
 	}
 
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		logger.Error().Msgf("loading data from %s failed with status %d", url, resp.StatusCode)
-		return
+		err = fmt.Errorf("loading data from %s failed with status %d", url, resp.StatusCode)
+		return nil, err
 	}
 
-	status := struct {
-		Ski map[string]struct {
-			Active          bool   `json:"isActive"`
-			ExternalID      string `json:"externalId"`
-			LastPreparation string `json:"lastPreparation"`
-		} `json:"Ski"`
-	}{}
+	status := &Status{}
 
 	body, _ := io.ReadAll(resp.Body)
-	_ = json.Unmarshal(body, &status)
+	err = json.Unmarshal(body, status)
+
+	if err != nil {
+		err = fmt.Errorf("failed to unmarshal trail status: %s", err.Error())
+		return nil, err
+	}
+
+	return status, nil
+}
+
+func updateTrailsInBroker(ctx context.Context, status *Status, cbClient client.ContextBrokerClient, trailIDFormat string) error {
+
+	var err error
+
+	ctx, span := tracer.Start(ctx, "update-broker-status")
+	defer func() { tracing.RecordAnyErrorAndEndSpan(err, span) }()
+
+	logger := logging.GetFromContext(ctx)
 
 	ngsiLinkHeader := fmt.Sprintf("<%s>; rel=\"http://www.w3.org/ns/json-ld#context\"; type=\"application/ld+json\"", entities.DefaultContextURL)
 
@@ -153,14 +196,16 @@ func do(ctx context.Context, location, apiKey string, cbClient client.ContextBro
 				props = append(props, decorators.Text("status", currentStatus))
 			}
 
-			lastPrep, err := time.Parse(time.RFC3339, v.LastPreparation)
-			if err != nil {
-				logger.Warn().Err(err).Msgf("failed to parse trail preparation timestamp for %s", trailID)
-			} else {
-				prepTime := lastPrep.Format(time.RFC3339)
-				if lastKnownPreparation != prepTime {
-					logger.Info().Msg("last known preparation has changed")
-					props = append(props, decorators.DateTime("dateLastPreparation", prepTime))
+			if v.LastPreparation != "" {
+				lastPrep, err := time.Parse(time.RFC3339, v.LastPreparation)
+				if err != nil {
+					logger.Warn().Err(err).Msgf("failed to parse trail preparation timestamp for %s", trailID)
+				} else {
+					prepTime := lastPrep.Format(time.RFC3339)
+					if lastKnownPreparation != prepTime {
+						logger.Info().Msg("last known preparation has changed")
+						props = append(props, decorators.DateTime("dateLastPreparation", prepTime))
+					}
 				}
 			}
 
@@ -179,4 +224,6 @@ func do(ctx context.Context, location, apiKey string, cbClient client.ContextBro
 			time.Sleep(1 * time.Second)
 		}
 	}
+
+	return nil
 }
