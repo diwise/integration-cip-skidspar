@@ -26,6 +26,8 @@ const serviceName string = "integration-cip-skidspar"
 
 var tracer = otel.Tracer(serviceName + "/main")
 
+const sportsFieldIDFormat string = "urn:ngsi-ld:SportsField:se:sundsvall:facilities:"
+
 func main() {
 
 	serviceVersion := buildinfo.SourceVersion()
@@ -43,6 +45,8 @@ func main() {
 
 	trailIDFormat := env.GetVariableOrDefault(logger, "NGSI_TRAILID_FORMAT", "%s")
 
+	getEntityTypes(ctx, brokerURL, brokerTenant)
+
 	do(ctx, location, apiKey, cbClient, trailIDFormat)
 
 	logger.Info().Msg("running cleanup ...")
@@ -50,6 +54,25 @@ func main() {
 
 	time.Sleep(5 * time.Second)
 	logger.Info().Msg("done")
+}
+
+func getEntityTypes(ctx context.Context, brokerURL, brokerTenant string) error {
+	var err error
+
+	logger := logging.GetFromContext(ctx)
+
+	err = GetSportsFields(ctx, brokerURL, brokerTenant)
+	if err != nil {
+		logger.Error().Err(err).Msg("failed to get sportsfields from broker")
+		return err
+	}
+
+	err = GetExerciseTrails(ctx, brokerURL, brokerTenant)
+	if err != nil {
+		logger.Error().Err(err).Msg("failed to get exercise trails from broker")
+		return err
+	}
+	return nil
 }
 
 func do(ctx context.Context, location, apiKey string, cbClient client.ContextBrokerClient, trailIDFormat string) {
@@ -61,15 +84,15 @@ func do(ctx context.Context, location, apiKey string, cbClient client.ContextBro
 
 	_, ctx, logger := o11y.AddTraceIDToLoggerAndStoreInContext(span, logging.GetFromContext(ctx), ctx)
 
-	status, err := getTrailStatus(ctx, location, apiKey)
+	status, err := getEntityStatus(ctx, location, apiKey)
 	if err != nil {
-		logger.Error().Err(err).Msg("failed to retrieve trail status")
+		logger.Error().Err(err).Msg("failed to retrieve entity status")
 		return
 	}
 
-	err = updateTrailsInBroker(ctx, status, cbClient, trailIDFormat)
+	err = updateEntitiesInBroker(ctx, status, cbClient, trailIDFormat)
 	if err != nil {
-		logger.Error().Err(err).Msg("failed to update trail statuses in broker")
+		logger.Error().Err(err).Msg("failed to update entity statuses in broker")
 	}
 }
 
@@ -81,8 +104,7 @@ type Status struct {
 	} `json:"Ski"`
 }
 
-func getTrailStatus(ctx context.Context, location, apiKey string) (*Status, error) {
-
+func getEntityStatus(ctx context.Context, location, apiKey string) (*Status, error) {
 	var err error
 
 	ctx, span := tracer.Start(ctx, "get-langdspar-status")
@@ -102,7 +124,7 @@ func getTrailStatus(ctx context.Context, location, apiKey string) (*Status, erro
 
 	resp, err := httpClient.Do(req)
 	if err != nil {
-		err = fmt.Errorf("failed to request trail status update: %s", err.Error())
+		err = fmt.Errorf("failed to request entity status update: %s", err.Error())
 		return nil, err
 	}
 
@@ -116,17 +138,18 @@ func getTrailStatus(ctx context.Context, location, apiKey string) (*Status, erro
 	status := &Status{}
 
 	body, _ := io.ReadAll(resp.Body)
+
 	err = json.Unmarshal(body, status)
 
 	if err != nil {
-		err = fmt.Errorf("failed to unmarshal trail status: %s", err.Error())
+		err = fmt.Errorf("failed to unmarshal entity status: %s", err.Error())
 		return nil, err
 	}
 
 	return status, nil
 }
 
-func updateTrailsInBroker(ctx context.Context, status *Status, cbClient client.ContextBrokerClient, trailIDFormat string) error {
+func updateEntitiesInBroker(ctx context.Context, status *Status, cbClient client.ContextBrokerClient, trailIDFormat string) error {
 
 	var err error
 
@@ -139,20 +162,24 @@ func updateTrailsInBroker(ctx context.Context, status *Status, cbClient client.C
 
 	for k, v := range status.Ski {
 		if v.ExternalID != "" {
+			entityID := trailIDFormat + v.ExternalID
 
-			trailID := fmt.Sprintf(trailIDFormat, v.ExternalID)
-			logger.Info().Msgf("found trail status for %s (%s)", trailID, k)
+			if storedIDFormats[v.ExternalID] == "SportsField" {
+				entityID = sportsFieldIDFormat + v.ExternalID
+			}
+
+			logger.Info().Msgf("found preparation status for %s (%s)", entityID, k)
 
 			headers := map[string][]string{
 				"Accept": {"application/ld+json"},
 				"Link":   {ngsiLinkHeader},
 			}
-			entity, err := cbClient.RetrieveEntity(ctx, trailID, headers)
+			entity, err := cbClient.RetrieveEntity(ctx, entityID, headers)
 			if err != nil {
 				if errors.Is(err, ngsierrors.ErrNotFound) {
-					logger.Info().Msg("no such trail in broker")
+					logger.Info().Msg("no such entity in broker")
 				} else {
-					logger.Error().Err(err).Msgf("failed to retrieve %s", trailID)
+					logger.Error().Err(err).Msgf("failed to retrieve %s", entityID)
 				}
 				continue
 			}
@@ -192,14 +219,14 @@ func updateTrailsInBroker(ctx context.Context, status *Status, cbClient client.C
 			props := []entities.EntityDecoratorFunc{}
 
 			if hasChangedStatus {
-				logger.Info().Msgf("trail has changed status to %s", currentStatus)
+				logger.Info().Msgf("entity has changed status to %s", currentStatus)
 				props = append(props, decorators.Text("status", currentStatus))
 			}
 
 			if v.LastPreparation != "" {
 				lastPrep, err := time.Parse(time.RFC3339, v.LastPreparation)
 				if err != nil {
-					logger.Warn().Err(err).Msgf("failed to parse trail preparation timestamp for %s", trailID)
+					logger.Warn().Err(err).Msgf("failed to parse entity preparation timestamp for %s", entityID)
 				} else {
 					prepTime := lastPrep.Format(time.RFC3339)
 					if lastKnownPreparation != prepTime {
@@ -213,9 +240,9 @@ func updateTrailsInBroker(ctx context.Context, status *Status, cbClient client.C
 				fragment, _ := entities.NewFragment(props...)
 
 				headers = map[string][]string{"Content-Type": {"application/ld+json"}}
-				_, err := cbClient.MergeEntity(ctx, trailID, fragment, headers)
+				_, err := cbClient.MergeEntity(ctx, entityID, fragment, headers)
 				if err != nil {
-					logger.Error().Err(err).Msgf("failed to merge entity %s", trailID)
+					logger.Error().Err(err).Msgf("failed to merge entity %s", entityID)
 				}
 			} else {
 				logger.Info().Msg("neither status nor preparation time has changed")
