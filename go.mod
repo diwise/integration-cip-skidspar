@@ -5,6 +5,7 @@ go 1.19
 require (
 	github.com/diwise/context-broker v0.0.0-20221026061636-e620234b345f
 	github.com/diwise/service-chassis v0.0.0-20221102141400-67da00b28e7a
+	github.com/matryer/is v1.4.0
 	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.34.0
 	go.opentelemetry.io/otel v1.11.1
 )
