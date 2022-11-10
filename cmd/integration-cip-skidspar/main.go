@@ -46,7 +46,7 @@ func main() {
 	typeFormats := make(map[string]string)
 
 	if trailIDFormat != "" {
-		typeFormats[trailIDFormat] = "ExerciseTrails"
+		typeFormats[trailIDFormat] = "ExerciseTrail"
 	}
 	if sportsfieldIDFormat != "" {
 		typeFormats[sportsfieldIDFormat] = "SportsField"
@@ -54,7 +54,7 @@ func main() {
 
 	entities, err := get.EntitiesFromContextBroker(ctx, brokerURL, brokerTenant, typeFormats)
 	if err != nil {
-		logger.Error().Err(err).Msg("failed to get sportsfields from broker")
+		logger.Error().Err(err).Msg("failed to get entities from broker")
 	}
 
 	do(ctx, location, apiKey, cbClient, entities)
