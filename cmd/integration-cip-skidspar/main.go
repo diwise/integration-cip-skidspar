@@ -40,13 +40,9 @@ func main() {
 	trailIDFormat := env.GetVariableOrDefault(logger, "NGSI_TRAILID_FORMAT", "%s")
 	sportsfieldIDFormat := env.GetVariableOrDefault(logger, "NGSI_SPORTSFIELDID_FORMAT", "%s")
 
-	typeFormats := make(map[string]string)
-
-	if trailIDFormat != "" {
-		typeFormats[trailIDFormat] = "ExerciseTrail"
-	}
-	if sportsfieldIDFormat != "" {
-		typeFormats[sportsfieldIDFormat] = "SportsField"
+	typeFormats := map[string]string{
+		trailIDFormat:       "ExerciseTrail",
+		sportsfieldIDFormat: "SportsField",
 	}
 
 	entities, err := GetEntitiesFromContextBroker(ctx, brokerURL, brokerTenant, typeFormats)
