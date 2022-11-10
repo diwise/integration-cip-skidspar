@@ -1,4 +1,4 @@
-package models
+package main
 
 type Status struct {
 	Ski map[string]struct {

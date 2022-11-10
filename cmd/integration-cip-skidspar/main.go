@@ -9,9 +9,6 @@ import (
 	"time"
 
 	"github.com/diwise/context-broker/pkg/ngsild/client"
-	"github.com/diwise/integration-cip-skidspar/get"
-	"github.com/diwise/integration-cip-skidspar/models"
-	"github.com/diwise/integration-cip-skidspar/update"
 	"github.com/diwise/service-chassis/pkg/infrastructure/buildinfo"
 	"github.com/diwise/service-chassis/pkg/infrastructure/env"
 	"github.com/diwise/service-chassis/pkg/infrastructure/o11y"
@@ -52,7 +49,7 @@ func main() {
 		typeFormats[sportsfieldIDFormat] = "SportsField"
 	}
 
-	entities, err := get.EntitiesFromContextBroker(ctx, brokerURL, brokerTenant, typeFormats)
+	entities, err := GetEntitiesFromContextBroker(ctx, brokerURL, brokerTenant, typeFormats)
 	if err != nil {
 		logger.Error().Err(err).Msg("failed to get entities from broker")
 	}
@@ -66,7 +63,7 @@ func main() {
 	logger.Info().Msg("done")
 }
 
-func do(ctx context.Context, location, apiKey string, cbClient client.ContextBrokerClient, entities map[string]models.StoredEntity) {
+func do(ctx context.Context, location, apiKey string, cbClient client.ContextBrokerClient, entities map[string]StoredEntity) {
 	var err error
 
 	ctx, span := tracer.Start(ctx, "integrate-status-from-langdspar")
@@ -80,13 +77,13 @@ func do(ctx context.Context, location, apiKey string, cbClient client.ContextBro
 		return
 	}
 
-	err = update.EntitiesInBroker(ctx, status, cbClient, entities)
+	err = UpdateEntitiesInBroker(ctx, status, cbClient, entities)
 	if err != nil {
 		logger.Error().Err(err).Msg("failed to update entity statuses in broker")
 	}
 }
 
-func getEntityStatus(ctx context.Context, location, apiKey string) (*models.Status, error) {
+func getEntityStatus(ctx context.Context, location, apiKey string) (*Status, error) {
 	var err error
 
 	ctx, span := tracer.Start(ctx, "get-langdspar-status")
@@ -117,7 +114,7 @@ func getEntityStatus(ctx context.Context, location, apiKey string) (*models.Stat
 		return nil, err
 	}
 
-	status := &models.Status{}
+	status := &Status{}
 
 	body, _ := io.ReadAll(resp.Body)
 

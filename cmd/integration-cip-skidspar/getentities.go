@@ -1,4 +1,4 @@
-package get
+package main
 
 import (
 	"context"
@@ -10,19 +10,18 @@ import (
 	"strings"
 
 	"github.com/diwise/context-broker/pkg/ngsild/types/entities"
-	"github.com/diwise/integration-cip-skidspar/models"
 	"github.com/diwise/service-chassis/pkg/infrastructure/o11y/logging"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 )
 
-func EntitiesFromContextBroker(ctx context.Context, brokerURL, tenant string, entityTypes map[string]string) (map[string]models.StoredEntity, error) {
+func GetEntitiesFromContextBroker(ctx context.Context, brokerURL, tenant string, entityTypes map[string]string) (map[string]StoredEntity, error) {
 	logger := logging.GetFromContext(ctx)
 
 	httpClient := http.Client{
 		Transport: otelhttp.NewTransport(http.DefaultTransport),
 	}
 
-	storedEntities := make(map[string]models.StoredEntity)
+	storedEntities := make(map[string]StoredEntity)
 
 	for format, entityType := range entityTypes {
 		url := fmt.Sprintf(brokerURL+"/ngsi-ld/v1/entities?type=%s&limit=1000&options=keyValues", entityType)
@@ -77,7 +76,7 @@ func EntitiesFromContextBroker(ctx context.Context, brokerURL, tenant string, en
 			entityID := strings.TrimPrefix(sf.ID, format)
 			_, exists := storedEntities[entityID]
 			if !exists {
-				newEntity := models.StoredEntity{
+				newEntity := StoredEntity{
 					ID:     sf.ID,
 					Type:   sf.Type,
 					Format: format,

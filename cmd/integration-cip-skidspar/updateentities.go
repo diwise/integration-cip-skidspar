@@ -1,4 +1,4 @@
-package update
+package main
 
 import (
 	"context"
@@ -11,17 +11,11 @@ import (
 	ngsierrors "github.com/diwise/context-broker/pkg/ngsild/errors"
 	"github.com/diwise/context-broker/pkg/ngsild/types/entities"
 	"github.com/diwise/context-broker/pkg/ngsild/types/entities/decorators"
-	"github.com/diwise/integration-cip-skidspar/models"
 	"github.com/diwise/service-chassis/pkg/infrastructure/o11y/logging"
 	"github.com/diwise/service-chassis/pkg/infrastructure/o11y/tracing"
-	"go.opentelemetry.io/otel"
 )
 
-const serviceName string = "integration-cip-skidspar"
-
-var tracer = otel.Tracer(serviceName + "/update")
-
-func EntitiesInBroker(ctx context.Context, status *models.Status, cbClient client.ContextBrokerClient, storedEntities map[string]models.StoredEntity) error {
+func UpdateEntitiesInBroker(ctx context.Context, status *Status, cbClient client.ContextBrokerClient, storedEntities map[string]StoredEntity) error {
 
 	var err error
 

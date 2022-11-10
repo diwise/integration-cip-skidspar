@@ -1,4 +1,4 @@
-package get
+package main
 
 import (
 	"context"
@@ -19,7 +19,7 @@ func TestGetEntitiesFromCtxBroker(t *testing.T) {
 		"exercisetrailFormat": "ExerciseTrail",
 	}
 
-	entities, err := EntitiesFromContextBroker(context.Background(), server.URL, "default", types)
+	entities, err := GetEntitiesFromContextBroker(context.Background(), server.URL, "default", types)
 	is.NoErr(err)
 	is.Equal(len(entities), 2)
 }
