@@ -13,6 +13,7 @@ import (
 	ngsierrors "github.com/diwise/context-broker/pkg/ngsild/errors"
 	"github.com/diwise/context-broker/pkg/ngsild/types/entities"
 	"github.com/diwise/context-broker/pkg/ngsild/types/entities/decorators"
+	"github.com/diwise/integration-cip-skidspar/get"
 	"github.com/diwise/service-chassis/pkg/infrastructure/buildinfo"
 	"github.com/diwise/service-chassis/pkg/infrastructure/env"
 	"github.com/diwise/service-chassis/pkg/infrastructure/o11y"
@@ -25,8 +26,6 @@ import (
 const serviceName string = "integration-cip-skidspar"
 
 var tracer = otel.Tracer(serviceName + "/main")
-
-const sportsFieldIDFormat string = "urn:ngsi-ld:SportsField:se:sundsvall:facilities:"
 
 func main() {
 
@@ -44,10 +43,23 @@ func main() {
 	apiKey := env.GetVariableOrDie(logger, "LS_API_KEY", "a valid api key for längdspår.se")
 
 	trailIDFormat := env.GetVariableOrDefault(logger, "NGSI_TRAILID_FORMAT", "%s")
+	sportsfieldIDFormat := env.GetVariableOrDefault(logger, "NGSI_SPORTSFIELDID_FORMAT", "%s")
 
-	getEntityTypes(ctx, brokerURL, brokerTenant)
+	typeFormats := make(map[string]string)
 
-	do(ctx, location, apiKey, cbClient, trailIDFormat)
+	if trailIDFormat != "" {
+		typeFormats[trailIDFormat] = "ExerciseTrails"
+	}
+	if sportsfieldIDFormat != "" {
+		typeFormats[sportsfieldIDFormat] = "SportsField"
+	}
+
+	entities, err := get.EntitiesFromContextBroker(ctx, brokerURL, brokerTenant, typeFormats)
+	if err != nil {
+		logger.Error().Err(err).Msg("failed to get sportsfields from broker")
+	}
+
+	do(ctx, location, apiKey, cbClient, typeFormats, entities)
 
 	logger.Info().Msg("running cleanup ...")
 	cleanup()
@@ -56,27 +68,7 @@ func main() {
 	logger.Info().Msg("done")
 }
 
-func getEntityTypes(ctx context.Context, brokerURL, brokerTenant string) error {
-	var err error
-
-	logger := logging.GetFromContext(ctx)
-
-	err = GetSportsFields(ctx, brokerURL, brokerTenant)
-	if err != nil {
-		logger.Error().Err(err).Msg("failed to get sportsfields from broker")
-		return err
-	}
-
-	err = GetExerciseTrails(ctx, brokerURL, brokerTenant)
-	if err != nil {
-		logger.Error().Err(err).Msg("failed to get exercise trails from broker")
-		return err
-	}
-	return nil
-}
-
-func do(ctx context.Context, location, apiKey string, cbClient client.ContextBrokerClient, trailIDFormat string) {
-
+func do(ctx context.Context, location, apiKey string, cbClient client.ContextBrokerClient, typeFormats, entities map[string]string) {
 	var err error
 
 	ctx, span := tracer.Start(ctx, "integrate-status-from-langdspar")
@@ -90,7 +82,7 @@ func do(ctx context.Context, location, apiKey string, cbClient client.ContextBro
 		return
 	}
 
-	err = updateEntitiesInBroker(ctx, status, cbClient, trailIDFormat)
+	err = updateEntitiesInBroker(ctx, status, cbClient, typeFormats, entities)
 	if err != nil {
 		logger.Error().Err(err).Msg("failed to update entity statuses in broker")
 	}
@@ -149,7 +141,7 @@ func getEntityStatus(ctx context.Context, location, apiKey string) (*Status, err
 	return status, nil
 }
 
-func updateEntitiesInBroker(ctx context.Context, status *Status, cbClient client.ContextBrokerClient, trailIDFormat string) error {
+func updateEntitiesInBroker(ctx context.Context, status *Status, cbClient client.ContextBrokerClient, typeFormats string) error {
 
 	var err error
 
@@ -162,11 +154,7 @@ func updateEntitiesInBroker(ctx context.Context, status *Status, cbClient client
 
 	for k, v := range status.Ski {
 		if v.ExternalID != "" {
-			entityID := trailIDFormat + v.ExternalID
-
-			if storedIDFormats[v.ExternalID] == "SportsField" {
-				entityID = sportsFieldIDFormat + v.ExternalID
-			}
+			entityID := typeFormat + v.ExternalID
 
 			logger.Info().Msgf("found preparation status for %s (%s)", entityID, k)
 
