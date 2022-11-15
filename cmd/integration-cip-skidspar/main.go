@@ -22,6 +22,14 @@ const serviceName string = "integration-cip-skidspar"
 
 var tracer = otel.Tracer(serviceName + "/main")
 
+var storedEntities = make(map[string]StoredEntity)
+
+type StoredEntity struct {
+	ID                  string `json:"id"`
+	DateLastPreparation string `json:"dateLastPreparation"`
+	Status              string `json:"status"`
+}
+
 func main() {
 
 	serviceVersion := buildinfo.SourceVersion()
@@ -40,17 +48,7 @@ func main() {
 	trailIDFormat := env.GetVariableOrDefault(logger, "NGSI_TRAILID_FORMAT", "%s")
 	sportsfieldIDFormat := env.GetVariableOrDefault(logger, "NGSI_SPORTSFIELDID_FORMAT", "%s")
 
-	typeFormats := map[string]string{
-		trailIDFormat:       "ExerciseTrail",
-		sportsfieldIDFormat: "SportsField",
-	}
-
-	entities, err := GetEntitiesFromContextBroker(ctx, brokerURL, brokerTenant, typeFormats)
-	if err != nil {
-		logger.Error().Err(err).Msg("failed to get entities from broker")
-	}
-
-	do(ctx, location, apiKey, cbClient, entities)
+	do(ctx, cbClient, location, brokerURL, brokerTenant, apiKey, trailIDFormat, sportsfieldIDFormat)
 
 	logger.Info().Msg("running cleanup ...")
 	cleanup()
@@ -59,7 +57,7 @@ func main() {
 	logger.Info().Msg("done")
 }
 
-func do(ctx context.Context, location, apiKey string, cbClient client.ContextBrokerClient, entities map[string]StoredEntity) {
+func do(ctx context.Context, cbClient client.ContextBrokerClient, brokerURL, tenant, location, apiKey, trailIDFormat, sportsfieldIDFormat string) {
 	var err error
 
 	ctx, span := tracer.Start(ctx, "integrate-status-from-langdspar")
@@ -73,7 +71,19 @@ func do(ctx context.Context, location, apiKey string, cbClient client.ContextBro
 		return
 	}
 
-	err = UpdateEntitiesInBroker(ctx, status, cbClient, entities)
+	err = getExerciseTrails(ctx, brokerURL, tenant, trailIDFormat, storedEntities)
+	if err != nil {
+		logger.Error().Err(err).Msg("failed to retrieve exercise trails from context broker")
+		return
+	}
+
+	err = getSportsFields(ctx, brokerURL, tenant, sportsfieldIDFormat, storedEntities)
+	if err != nil {
+		logger.Error().Err(err).Msg("failed to retrieve sportsfields from context broker")
+		return
+	}
+
+	err = UpdateEntitiesInBroker(ctx, status, cbClient, storedEntities)
 	if err != nil {
 		logger.Error().Err(err).Msg("failed to update entity statuses in broker")
 	}

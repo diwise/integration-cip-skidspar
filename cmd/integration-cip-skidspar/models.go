@@ -7,9 +7,3 @@ type Status struct {
 		LastPreparation string `json:"lastPreparation"`
 	} `json:"Ski"`
 }
-
-type StoredEntity struct {
-	ID     string `json:"id"`
-	Type   string `json:"type"`
-	Format string `json:"format"`
-}
