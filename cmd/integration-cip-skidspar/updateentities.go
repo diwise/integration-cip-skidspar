@@ -2,21 +2,16 @@ package main
 
 import (
 	"context"
-	"encoding/json"
-	"errors"
-	"fmt"
 	"time"
 
 	"github.com/diwise/context-broker/pkg/ngsild/client"
-	ngsierrors "github.com/diwise/context-broker/pkg/ngsild/errors"
 	"github.com/diwise/context-broker/pkg/ngsild/types/entities"
 	"github.com/diwise/context-broker/pkg/ngsild/types/entities/decorators"
 	"github.com/diwise/service-chassis/pkg/infrastructure/o11y/logging"
 	"github.com/diwise/service-chassis/pkg/infrastructure/o11y/tracing"
 )
 
-func UpdateEntitiesInBroker(ctx context.Context, status *Status, cbClient client.ContextBrokerClient, storedEntities map[string]StoredEntity) error {
-
+func UpdateEntitiesInBroker(ctx context.Context, status *Status, cbClient client.ContextBrokerClient, entityStatus func(string) (StoredEntity, error)) error {
 	var err error
 
 	ctx, span := tracer.Start(ctx, "update-broker-status")
@@ -24,58 +19,27 @@ func UpdateEntitiesInBroker(ctx context.Context, status *Status, cbClient client
 
 	logger := logging.GetFromContext(ctx)
 
-	ngsiLinkHeader := fmt.Sprintf("<%s>; rel=\"http://www.w3.org/ns/json-ld#context\"; type=\"application/ld+json\"", entities.DefaultContextURL)
-
 	for k, v := range status.Ski {
-		if v.ExternalID != "" && v.ExternalID == storedEntities[v.ExternalID].ID {
-			entityID := storedEntities[v.ExternalID].Format + v.ExternalID
+		if v.ExternalID != "" {
+			storedEntity, err := entityStatus(v.ExternalID)
+			if err != nil {
+				logger.Error().Err(err).Msgf("entity %s not found", v.ExternalID)
+				continue
+			}
 
-			logger.Info().Msgf("found preparation status for %s (%s)", entityID, k)
+			logger.Info().Msgf("found preparation status for %s (%s)", v.ExternalID, k)
 
 			headers := map[string][]string{
 				"Accept": {"application/ld+json"},
-				"Link":   {ngsiLinkHeader},
-			}
-			entity, err := cbClient.RetrieveEntity(ctx, entityID, headers)
-			if err != nil {
-				if errors.Is(err, ngsierrors.ErrNotFound) {
-					logger.Info().Msg("no such entity in broker")
-				} else {
-					logger.Error().Err(err).Msgf("failed to retrieve %s", entityID)
-				}
-				continue
+				"Link":   {entities.LinkHeader},
 			}
 
 			hasChangedStatus := false
-			lastKnownPreparation := ""
 			currentStatus := map[bool]string{true: "open", false: "closed"}[v.Active]
+			lastKnownPreparation := storedEntity.DateLastPreparation
 
-			// TODO: Replace this with some clever use of generics to retrieve property values
-			err = entity.ForEachAttribute(func(attrType, attrName string, contents any) {
-				if attrName == "status" {
-					savedStatus, ok := contents.(string)
-					if ok && currentStatus != savedStatus {
-						hasChangedStatus = true
-					}
-				} else if attrName == "dateLastPreparation" {
-					b, _ := json.Marshal(contents)
-					property := struct {
-						Value struct {
-							Timestamp string `json:"@value"`
-						} `json:"value"`
-					}{}
-					err = json.Unmarshal(b, &property)
-					if err != nil {
-						logger.Error().Err(err).Msg("failed to unmarshal date time property")
-					} else {
-						lastKnownPreparation = property.Value.Timestamp
-					}
-				}
-			})
-
-			if err != nil {
-				logger.Error().Err(err).Msg("failed to iterate over entity attributes")
-				continue
+			if storedEntity.Status != "" && storedEntity.Status != currentStatus {
+				hasChangedStatus = true
 			}
 
 			props := []entities.EntityDecoratorFunc{}
@@ -85,10 +49,10 @@ func UpdateEntitiesInBroker(ctx context.Context, status *Status, cbClient client
 				props = append(props, decorators.Text("status", currentStatus))
 			}
 
-			if v.LastPreparation != "" {
+			if v.LastPreparation != "" && v.LastPreparation != lastKnownPreparation {
 				lastPrep, err := time.Parse(time.RFC3339, v.LastPreparation)
 				if err != nil {
-					logger.Warn().Err(err).Msgf("failed to parse entity preparation timestamp for %s", entityID)
+					logger.Warn().Err(err).Msgf("failed to parse entity preparation timestamp for %s", storedEntity.ID)
 				} else {
 					prepTime := lastPrep.Format(time.RFC3339)
 					if lastKnownPreparation != prepTime {
@@ -102,17 +66,19 @@ func UpdateEntitiesInBroker(ctx context.Context, status *Status, cbClient client
 				fragment, _ := entities.NewFragment(props...)
 
 				headers = map[string][]string{"Content-Type": {"application/ld+json"}}
-				_, err := cbClient.MergeEntity(ctx, entityID, fragment, headers)
+				_, err := cbClient.MergeEntity(ctx, storedEntity.ID, fragment, headers)
 				if err != nil {
-					logger.Error().Err(err).Msgf("failed to merge entity %s", entityID)
+					logger.Error().Err(err).Msgf("failed to merge entity %s", storedEntity.ID)
+					return err
 				}
 			} else {
 				logger.Info().Msg("neither status nor preparation time has changed")
 			}
 
 			time.Sleep(1 * time.Second)
+
 		}
 	}
 
-	return nil
+	return err
 }

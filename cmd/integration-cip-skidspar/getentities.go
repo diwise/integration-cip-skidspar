@@ -7,7 +7,6 @@ import (
 	"io"
 	"net/http"
 	"net/http/httputil"
-	"strings"
 
 	"github.com/diwise/context-broker/pkg/ngsild/types/entities"
 	"github.com/diwise/service-chassis/pkg/infrastructure/o11y/logging"
@@ -23,8 +22,8 @@ type entityDTO struct {
 	Status string `json:"status"`
 }
 
-func getExerciseTrails(ctx context.Context, brokerURL, tenant, trailIDFormat string, storedEntities map[string]StoredEntity) error {
-	err := getEntities(ctx, brokerURL, tenant, trailIDFormat, "ExerciseTrail", storedEntities)
+func getExerciseTrails(ctx context.Context, brokerURL, tenant, trailIDFormat string, storeEntity func(entity StoredEntity)) error {
+	err := getEntities(ctx, brokerURL, tenant, trailIDFormat, "ExerciseTrail", storeEntity)
 	if err != nil {
 		return err
 	}
@@ -32,8 +31,8 @@ func getExerciseTrails(ctx context.Context, brokerURL, tenant, trailIDFormat str
 	return nil
 }
 
-func getSportsFields(ctx context.Context, brokerURL, tenant, sportsfieldIDFormat string, storedEntities map[string]StoredEntity) error {
-	err := getEntities(ctx, brokerURL, tenant, sportsfieldIDFormat, "SportsField", storedEntities)
+func getSportsFields(ctx context.Context, brokerURL, tenant, sportsfieldIDFormat string, storeEntity func(entity StoredEntity)) error {
+	err := getEntities(ctx, brokerURL, tenant, sportsfieldIDFormat, "SportsField", storeEntity)
 	if err != nil {
 		return err
 	}
@@ -41,7 +40,7 @@ func getSportsFields(ctx context.Context, brokerURL, tenant, sportsfieldIDFormat
 	return nil
 }
 
-func getEntities(ctx context.Context, brokerURL, tenant, entityPrefixFormat, entityType string, storedEntities map[string]StoredEntity) error {
+func getEntities(ctx context.Context, brokerURL, tenant, entityPrefixFormat, entityType string, storeEntity func(entity StoredEntity)) error {
 
 	logger := logging.GetFromContext(ctx)
 
@@ -49,7 +48,7 @@ func getEntities(ctx context.Context, brokerURL, tenant, entityPrefixFormat, ent
 		Transport: otelhttp.NewTransport(http.DefaultTransport),
 	}
 
-	url := fmt.Sprintf(brokerURL+"/ngsi-ld/v1/entities?type=%s", entityType)
+	url := fmt.Sprintf(brokerURL+"/ngsi-ld/v1/entities?type=%s&limit=500&offset", entityType)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return fmt.Errorf("failed to create request: %s", err.Error())
@@ -93,17 +92,13 @@ func getEntities(ctx context.Context, brokerURL, tenant, entityPrefixFormat, ent
 	}
 
 	for _, ntt := range entities {
-		entityIDSuffix := strings.TrimPrefix(ntt.ID, entityPrefixFormat)
-		sportsfield := StoredEntity{
+		entity := StoredEntity{
 			ID:                  ntt.ID,
 			DateLastPreparation: ntt.DateLastPreparation.Value,
 			Status:              ntt.Status,
 		}
 
-		_, exists := storedEntities[entityIDSuffix]
-		if !exists {
-			storedEntities[entityIDSuffix] = sportsfield
-		}
+		storeEntity(entity)
 	}
 
 	return nil

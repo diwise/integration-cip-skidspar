@@ -22,8 +22,6 @@ const serviceName string = "integration-cip-skidspar"
 
 var tracer = otel.Tracer(serviceName + "/main")
 
-var storedEntities = make(map[string]StoredEntity)
-
 type StoredEntity struct {
 	ID                  string `json:"id"`
 	DateLastPreparation string `json:"dateLastPreparation"`
@@ -71,19 +69,41 @@ func do(ctx context.Context, cbClient client.ContextBrokerClient, brokerURL, ten
 		return
 	}
 
-	err = getExerciseTrails(ctx, brokerURL, tenant, trailIDFormat, storedEntities)
+	var storedEntities = make(map[string]StoredEntity)
+
+	storeEntity := func(entity StoredEntity) {
+		storedEntities[entity.ID] = entity
+	}
+
+	err = getExerciseTrails(ctx, brokerURL, tenant, trailIDFormat, storeEntity)
 	if err != nil {
 		logger.Error().Err(err).Msg("failed to retrieve exercise trails from context broker")
 		return
 	}
 
-	err = getSportsFields(ctx, brokerURL, tenant, sportsfieldIDFormat, storedEntities)
+	err = getSportsFields(ctx, brokerURL, tenant, sportsfieldIDFormat, storeEntity)
 	if err != nil {
 		logger.Error().Err(err).Msg("failed to retrieve sportsfields from context broker")
 		return
 	}
 
-	err = UpdateEntitiesInBroker(ctx, status, cbClient, storedEntities)
+	findStoredEntity := func(externalID string) (StoredEntity, error) {
+		trailID := fmt.Sprintf(trailIDFormat, externalID)
+		se, ok := storedEntities[trailID]
+		if ok {
+			return se, nil
+		}
+
+		sportsfieldID := fmt.Sprintf(sportsfieldIDFormat, externalID)
+		se, ok = storedEntities[sportsfieldID]
+		if ok {
+			return se, nil
+		}
+
+		return StoredEntity{}, fmt.Errorf("entity %s does not exist", externalID)
+	}
+
+	err = UpdateEntitiesInBroker(ctx, status, cbClient, findStoredEntity)
 	if err != nil {
 		logger.Error().Err(err).Msg("failed to update entity statuses in broker")
 	}
