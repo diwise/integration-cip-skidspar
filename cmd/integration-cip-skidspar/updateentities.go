@@ -23,7 +23,7 @@ func UpdateEntitiesInBroker(ctx context.Context, status *Status, cbClient client
 		if v.ExternalID != "" {
 			storedEntity, err := entityStatus(v.ExternalID)
 			if err != nil {
-				logger.Error().Err(err).Msgf("entity %s not found", v.ExternalID)
+				logger.Warn().Err(err).Msgf("entity %s not found", k)
 				continue
 			}
 
