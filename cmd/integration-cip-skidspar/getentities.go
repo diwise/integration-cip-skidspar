@@ -23,21 +23,11 @@ type entityDTO struct {
 }
 
 func getExerciseTrails(ctx context.Context, brokerURL, tenant, trailIDFormat string, storeEntity func(entity StoredEntity)) error {
-	err := getEntities(ctx, brokerURL, tenant, trailIDFormat, "ExerciseTrail", storeEntity)
-	if err != nil {
-		return err
-	}
-
-	return nil
+	return getEntities(ctx, brokerURL, tenant, trailIDFormat, "ExerciseTrail", storeEntity)
 }
 
 func getSportsFields(ctx context.Context, brokerURL, tenant, sportsfieldIDFormat string, storeEntity func(entity StoredEntity)) error {
-	err := getEntities(ctx, brokerURL, tenant, sportsfieldIDFormat, "SportsField", storeEntity)
-	if err != nil {
-		return err
-	}
-
-	return nil
+	return getEntities(ctx, brokerURL, tenant, sportsfieldIDFormat, "SportsField", storeEntity)
 }
 
 func getEntities(ctx context.Context, brokerURL, tenant, entityPrefixFormat, entityType string, storeEntity func(entity StoredEntity)) error {
@@ -48,12 +38,13 @@ func getEntities(ctx context.Context, brokerURL, tenant, entityPrefixFormat, ent
 		Transport: otelhttp.NewTransport(http.DefaultTransport),
 	}
 
-	url := fmt.Sprintf(brokerURL+"/ngsi-ld/v1/entities?type=%s&limit=500&offset", entityType)
+	url := fmt.Sprintf(brokerURL+"/ngsi-ld/v1/entities?type=%s&limit=500&options=keyValues", entityType)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return fmt.Errorf("failed to create request: %s", err.Error())
 	}
 
+	req.Header.Add("Accept", "application/ld+json")
 	req.Header.Add("Link", entities.LinkHeader)
 
 	if tenant != "default" {

@@ -29,11 +29,6 @@ func UpdateEntitiesInBroker(ctx context.Context, status *Status, cbClient client
 
 			logger.Info().Msgf("found preparation status for %s (%s)", v.ExternalID, k)
 
-			headers := map[string][]string{
-				"Accept": {"application/ld+json"},
-				"Link":   {entities.LinkHeader},
-			}
-
 			hasChangedStatus := false
 			currentStatus := map[bool]string{true: "open", false: "closed"}[v.Active]
 			lastKnownPreparation := storedEntity.DateLastPreparation
@@ -65,7 +60,7 @@ func UpdateEntitiesInBroker(ctx context.Context, status *Status, cbClient client
 			if len(props) > 0 {
 				fragment, _ := entities.NewFragment(props...)
 
-				headers = map[string][]string{"Content-Type": {"application/ld+json"}}
+				headers := map[string][]string{"Content-Type": {"application/ld+json"}}
 				_, err := cbClient.MergeEntity(ctx, storedEntity.ID, fragment, headers)
 				if err != nil {
 					logger.Error().Err(err).Msgf("failed to merge entity %s", storedEntity.ID)

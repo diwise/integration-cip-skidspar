@@ -22,6 +22,14 @@ const serviceName string = "integration-cip-skidspar"
 
 var tracer = otel.Tracer(serviceName + "/main")
 
+type Status struct {
+	Ski map[string]struct {
+		Active          bool   `json:"isActive"`
+		ExternalID      string `json:"externalId"`
+		LastPreparation string `json:"lastPreparation"`
+	} `json:"Ski"`
+}
+
 type StoredEntity struct {
 	ID                  string `json:"id"`
 	DateLastPreparation string `json:"dateLastPreparation"`
@@ -46,7 +54,7 @@ func main() {
 	trailIDFormat := env.GetVariableOrDefault(logger, "NGSI_TRAILID_FORMAT", "%s")
 	sportsfieldIDFormat := env.GetVariableOrDefault(logger, "NGSI_SPORTSFIELDID_FORMAT", "%s")
 
-	do(ctx, cbClient, location, brokerURL, brokerTenant, apiKey, trailIDFormat, sportsfieldIDFormat)
+	do(ctx, cbClient, brokerURL, brokerTenant, location, apiKey, trailIDFormat, sportsfieldIDFormat)
 
 	logger.Info().Msg("running cleanup ...")
 	cleanup()
