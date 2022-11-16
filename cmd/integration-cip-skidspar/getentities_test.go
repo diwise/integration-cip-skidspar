@@ -16,11 +16,15 @@ func TestGetEntitiesFromCtxBroker(t *testing.T) {
 
 	entities := make(map[string]StoredEntity)
 
-	err := getSportsFields(context.Background(), server.URL, "default", "urn:ngsi-ld:SportsField:se:sundsvall:facilities:", entities)
+	storeEntity := func(entity StoredEntity) {
+		entities[entity.ID] = entity
+	}
+
+	err := getSportsFields(context.Background(), server.URL, "default", "urn:ngsi-ld:SportsField:se:sundsvall:facilities:", storeEntity)
 	is.NoErr(err)
 	is.Equal(len(entities), 1)
 
-	err = getExerciseTrails(context.Background(), server.URL, "default", "urn:ngsi-ld:ExerciseTrail:se:sundsvall:facilities:", entities)
+	err = getExerciseTrails(context.Background(), server.URL, "default", "urn:ngsi-ld:ExerciseTrail:se:sundsvall:facilities:", storeEntity)
 	is.NoErr(err)
 	is.Equal(len(entities), 2)
 }
