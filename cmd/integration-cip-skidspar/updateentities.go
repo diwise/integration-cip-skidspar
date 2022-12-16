@@ -33,7 +33,7 @@ func UpdateEntitiesInBroker(ctx context.Context, status *Status, cbClient client
 			currentStatus := map[bool]string{true: "open", false: "closed"}[v.Active]
 			lastKnownPreparation := storedEntity.DateLastPreparation
 
-			if storedEntity.Status != "" && storedEntity.Status != currentStatus {
+			if storedEntity.Status != currentStatus {
 				hasChangedStatus = true
 			}
 
